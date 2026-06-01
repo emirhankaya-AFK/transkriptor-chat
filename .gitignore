@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+db.sqlite3
+/static/uploads/
+*.wav
+*.mp3
+*.mp4
+.vscode/
+.idea/
