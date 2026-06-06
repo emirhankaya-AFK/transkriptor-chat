@@ -1284,7 +1284,8 @@ def process_ocr():
             'scale': 'true'
         }
         
-        headers = {'apikey': 'helloworld'}
+        api_key = os.environ.get('OCR_API_KEY', 'helloworld')
+        headers = {'apikey': api_key}
         ocr_response = requests.post(
             'https://api.ocr.space/parse/image',
             data=payload,
@@ -1447,7 +1448,10 @@ def process_ocr():
                     
                 return jsonify({'status': 'error', 'message': f"Scanned search text: {queries}. No matching video found!"})
         else:
-            return jsonify({'status': 'error', 'message': 'OCR server failed to read the image.'})
+            error_details = ocr_result.get('ErrorMessage') or ocr_result.get('ErrorMessageDescription') or 'OCR server failed to read the image.'
+            if isinstance(error_details, list):
+                error_details = ", ".join(error_details)
+            return jsonify({'status': 'error', 'message': f'OCR error: {error_details}'})
             
     except Exception as e:
         return jsonify({'status': 'error', 'message': f"System error: {str(e)}"})
