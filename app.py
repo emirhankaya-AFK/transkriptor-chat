@@ -2,20 +2,61 @@ import re
 import os
 import base64
 import requests
+import time
 from flask import Flask, request, jsonify, render_template_string
 from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
 
 app = Flask(__name__)
 
+# IP-based rate limiting configuration
+IP_LIMITS = {}
+MAX_REQUESTS = 5
+BAN_DURATION = 300  # 5 minutes in seconds
+WINDOW_DURATION = 300  # 5 minutes in seconds
+
+def get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+def check_rate_limit(ip):
+    now = time.time()
+    if ip not in IP_LIMITS:
+        IP_LIMITS[ip] = {
+            'count': 0,
+            'banned_until': 0,
+            'first_request': now
+        }
+    
+    info = IP_LIMITS[ip]
+    
+    # Check if user is currently banned
+    if info['banned_until'] > now:
+        return False, int(info['banned_until'] - now)
+    
+    # Reset window if duration exceeded
+    if now - info['first_request'] > WINDOW_DURATION:
+        info['count'] = 0
+        info['first_request'] = now
+        
+    return True, 0
+
+def increment_rate_limit(ip):
+    info = IP_LIMITS[ip]
+    info['count'] += 1
+    if info['count'] > MAX_REQUESTS:
+        info['banned_until'] = time.time() + BAN_DURATION
+        return False, BAN_DURATION
+    return True, 0
+
+
 # Premium glassmorphic Chat UI
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transkriptör Chat - Çoklu Video Altyazı Asistanı</title>
+    <title>Transkriptor Chat - Multi-Video Subtitle Assistant</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -52,10 +93,33 @@ HTML_TEMPLATE = """
             position: relative;
         }
 
+        .rate-limit-banner {
+            width: 100%;
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-align: center;
+            transition: all 0.3s ease;
+            z-index: 1000;
+            background: rgba(16, 185, 129, 0.15);
+            border-bottom: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .rate-limit-banner.banned {
+            background: rgba(239, 68, 68, 0.15);
+            border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+        }
+
         .app-container {
             display: flex;
             flex: 1;
-            height: calc(100vh - 70px);
+            height: calc(100vh - 110px);
             overflow: hidden;
             position: relative;
         }
@@ -211,6 +275,7 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             transition: all 0.2s ease;
+            flex-shrink: 0;
         }
 
         .btn-attach:hover {
@@ -230,6 +295,7 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             transition: all 0.2s ease;
+            flex-shrink: 0;
         }
 
         .btn-send:hover {
@@ -363,6 +429,7 @@ HTML_TEMPLATE = """
 
         .sidebar {
             width: 450px;
+            max-width: 450px;
             border-left: 1px solid var(--border-color);
             background: rgba(17, 25, 40, 0.75);
             backdrop-filter: blur(20px);
@@ -371,10 +438,12 @@ HTML_TEMPLATE = """
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 50;
             overflow: hidden;
+            flex-shrink: 0;
         }
 
         .sidebar.closed {
             width: 0;
+            max-width: 0;
             border-left: none;
         }
 
@@ -524,15 +593,19 @@ HTML_TEMPLATE = """
 </head>
 <body>
 
+    <div class="rate-limit-banner" id="rateLimitBanner">
+        📷 Image OCR Limits: Checking status...
+    </div>
+
     <div class="drag-overlay" id="dragOverlay">
         <svg width="64" height="64" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"></path></svg>
-        <h2>Ekran Görüntüsünü Buraya Bırakın</h2>
+        <h2>Drop Screenshot Here</h2>
     </div>
 
     <header>
         <div class="logo">
-            <span>Transkriptör Chat</span>
-            <span class="badge">JSON Kararlı Çıktı</span>
+            <span>Transkriptor Chat</span>
+            <span class="badge">Stable JSON Output</span>
         </div>
     </header>
 
@@ -540,14 +613,15 @@ HTML_TEMPLATE = """
         <div class="chat-container">
             <div class="messages-list" id="messagesList">
                 <div class="message bot">
-                    <div class="message-meta">🤖 Transkriptör Asistanı</div>
+                    <div class="message-meta">🤖 Transkriptor Assistant</div>
                     <div class="message-content">
-                        Merhaba! Ben sizin çoklu video transkript asistanınızım. 
+                        Hello! I am your multi-video transcript assistant.
                         <br><br>
-                        <strong>Kararlı Altyazı Aktarımı Devrede:</strong>
+                        <strong>Stable Subtitle Pipeline Enabled:</strong>
                         <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                            <li>Sürüm 1.2.4'ün getirdiği karmaşık altyazı objeleri, tarayıcınızın okuyabileceği **standart listelere (JSON)** dönüştürüldü!</li>
-                            <li>Tüm dillerdeki videoların altyazıları artık hatasız olarak önbelleğe alınmakta ve kopyalanmaktadır.</li>
+                            <li>Convert complex multi-layered subtitle structures to standard serializable JSON format.</li>
+                            <li>Allows seamless translation caching and transcript exports.</li>
+                            <li>Paste a YouTube video link directly or upload/paste a screenshot of videos to start!</li>
                         </ul>
                     </div>
                 </div>
@@ -555,12 +629,12 @@ HTML_TEMPLATE = """
 
             <div class="input-panel">
                 <div class="input-wrapper">
-                    <button class="btn-attach" id="btnAttach" title="Ekran Görüntüsü Yükle">
+                    <button class="btn-attach" id="btnAttach" title="Upload Screenshot">
                         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"></path></svg>
                     </button>
                     <input type="file" id="fileSelector" accept="image/*" style="display: none;">
 
-                    <div class="rich-input" id="chatInput" contenteditable="true" placeholder="Bir YouTube linki yapıştırın veya doğrudan ekran görüntüsü kopyalayıp buraya Ctrl+V yapın..."></div>
+                    <div class="rich-input" id="chatInput" contenteditable="true" placeholder="Paste a YouTube link or drag/paste screenshots here..."></div>
                     
                     <button class="btn-send" id="btnSend">
                         <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"></path></svg>
@@ -569,25 +643,25 @@ HTML_TEMPLATE = """
                 <div class="input-hints">
                     <div class="paste-tip">
                         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                        Giriş alanına tıklayıp Ctrl+V yapın! Dosyayı sürükleyip bırakabilir ya da 📎 butonunu kullanabilirsiniz.
+                        Click in the input area and press Ctrl+V to paste link or screenshots directly!
                     </div>
-                    <div>Sınırsız Yerel Motor</div>
+                    <div>Local Engine Enabled</div>
                 </div>
             </div>
         </div>
 
         <div class="sidebar closed" id="sidebar">
             <div class="sidebar-header">
-                <h3 id="sidebarTitle">Altyazı Detayı</h3>
+                <h3 id="sidebarTitle">Transcript Detail</h3>
                 <button class="btn-close" id="btnCloseSidebar">×</button>
             </div>
             <div class="sidebar-content">
                 <div style="display: flex; gap: 0.5rem;">
                     <button class="btn-card primary" id="btnCopyFullTranscript" style="padding: 0.75rem;">
-                        Tüm Metni Kopyala
+                        Copy Full Text
                     </button>
                     <button class="btn-card" id="btnDownloadTranscriptTxt" style="padding: 0.75rem;">
-                        TXT İndir
+                        Download TXT
                     </button>
                 </div>
                 <div class="transcript-lines" id="sidebarLines">
@@ -596,7 +670,7 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <div class="toast" id="toast">Kopyalandı!</div>
+    <div class="toast" id="toast">Copied to clipboard!</div>
 
     <script>
         const chatInput = document.getElementById('chatInput');
@@ -616,6 +690,47 @@ HTML_TEMPLATE = """
 
         // Local cache of pre-fetched transcripts
         const loadedTranscripts = {};
+        let activeTranscript = [];
+        let activeVideoTitle = "";
+        let banTimer = null;
+
+        // Rate Limit Status Banner Updater
+        async function updateRateLimitBanner() {
+            try {
+                const res = await fetch('/api/rate-limit-status');
+                const data = await res.json();
+                const banner = document.getElementById('rateLimitBanner');
+                
+                if (data.is_banned) {
+                    banner.className = 'rate-limit-banner banned';
+                    if (banTimer) clearInterval(banTimer);
+                    let remaining = data.remaining_ban;
+                    
+                    const updateText = () => {
+                        banner.innerHTML = `🚨 <strong>IP Ban 5 min</strong> | Your IP is banned. Try again in ${remaining}s.`;
+                    };
+                    updateText();
+                    
+                    banTimer = setInterval(() => {
+                        remaining--;
+                        if (remaining <= 0) {
+                            clearInterval(banTimer);
+                            updateRateLimitBanner();
+                        } else {
+                            updateText();
+                        }
+                    }, 1000);
+                } else {
+                    banner.className = 'rate-limit-banner ok';
+                    banner.innerHTML = `📷 Image OCR Requests: <strong>${data.count}/${data.max}</strong> (Over-limit triggers an IP Ban of 5 min).`;
+                }
+            } catch (e) {
+                console.error("Failed to fetch rate limit status:", e);
+            }
+        }
+
+        // Initialize Rate Limit Banner Status
+        updateRateLimitBanner();
 
         btnSend.addEventListener('click', () => {
             const val = chatInput.textContent.trim();
@@ -721,7 +836,7 @@ HTML_TEMPLATE = """
             const msg = document.createElement('div');
             msg.className = 'message user';
             msg.innerHTML = `
-                <div class="message-meta">👤 Siz</div>
+                <div class="message-meta">👤 You</div>
                 <div class="message-content">${escapeHtml(text)}</div>
             `;
             messagesList.appendChild(msg);
@@ -732,16 +847,16 @@ HTML_TEMPLATE = """
             const msg = document.createElement('div');
             msg.className = 'message user';
             msg.innerHTML = `
-                <div class="message-meta">👤 Ekran Görüntüsü Yüklediniz</div>
+                <div class="message-meta">👤 Uploaded Screenshot</div>
                 <div class="message-content">
-                    <img src="${base64Image}" class="msg-image-preview" alt="Ekran Görüntüsü">
+                    <img src="${base64Image}" class="msg-image-preview" alt="Screenshot">
                 </div>
             `;
             messagesList.appendChild(msg);
             scrollChat();
         }
 
-        function addBotLoadingMessage(text="Analiz ediliyor...") {
+        function addBotLoadingMessage(text="Analyzing...") {
             const msg = document.createElement('div');
             msg.className = 'chat-loading';
             msg.id = 'tempLoader';
@@ -759,8 +874,13 @@ HTML_TEMPLATE = """
             if (loader) loader.remove();
         }
 
-        function showToast(message) {
+        function showToast(message, type="success") {
             toast.textContent = message;
+            if (type === "warning") {
+                toast.style.background = "#ef4444";
+            } else {
+                toast.style.background = "var(--accent)";
+            }
             toast.classList.add('show');
             setTimeout(() => {
                 toast.classList.remove('show');
@@ -776,7 +896,7 @@ HTML_TEMPLATE = """
         }
 
         async function processTextQuery(url) {
-            addBotLoadingMessage("Video analiz ediliyor...");
+            addBotLoadingMessage("Analyzing video...");
             try {
                 const response = await fetch('/api/transcript', {
                     method: 'POST',
@@ -791,27 +911,37 @@ HTML_TEMPLATE = """
                     loadedTranscripts[data.video_id] = data.transcript;
                     addBotVideoResponse([data]);
                 } else {
-                    addBotSimpleResponse(`Hata oluştu: ${data.message}`);
+                    addBotSimpleResponse(`Error: ${data.message}`);
                 }
             } catch (e) {
                 removeLoader();
-                addBotSimpleResponse("Sunucuya bağlanılamadı.");
+                addBotSimpleResponse("Failed to connect to the server.");
             }
         }
 
         async function processOcrQuery(base64Image) {
-            addBotLoadingMessage("Görüntüdeki tüm videolar ve altyazılar taranıyor...");
+            addBotLoadingMessage("Scanning image for videos and matching transcripts...");
             try {
                 const response = await fetch('/api/ocr', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ image: base64Image })
                 });
+                
+                // Always update rate limit banner status
+                await updateRateLimitBanner();
+
+                if (response.status === 429) {
+                    removeLoader();
+                    addBotSimpleResponse("Action Banned: Too many image upload requests. You have been banned for 5 minutes. IP Ban 5 min is active.");
+                    return;
+                }
+
                 const data = await response.json();
                 removeLoader();
 
                 if (data.status === 'success') {
-                    // Cache all pre-fetched transcripts into memory!
+                    // Cache all pre-fetched transcripts into memory
                     data.results.forEach(vid => {
                         if (vid.transcript) {
                             loadedTranscripts[vid.video_id] = vid.transcript;
@@ -819,12 +949,24 @@ HTML_TEMPLATE = """
                     });
                     addBotVideoResponse(data.results);
                 } else {
-                    addBotSimpleResponse(`Tarama tamamlandı ancak bir sorun oluştu: ${data.message}`);
+                    addBotSimpleResponse(`Scan finished but an issue occurred: ${data.message}`);
                 }
             } catch (e) {
                 removeLoader();
-                addBotSimpleResponse("Ekran görüntüsü OCR işlemi başarısız oldu.");
+                addBotSimpleResponse("Screenshot OCR processing failed.");
+                await updateRateLimitBanner();
             }
+        }
+
+        function addBotSimpleResponse(text) {
+            const msg = document.createElement('div');
+            msg.className = 'message bot';
+            msg.innerHTML = `
+                <div class="message-meta">🤖 Transkriptor Assistant</div>
+                <div class="message-content">${escapeHtml(text)}</div>
+            `;
+            messagesList.appendChild(msg);
+            scrollChat();
         }
 
         function addBotVideoResponse(videos) {
@@ -844,10 +986,10 @@ HTML_TEMPLATE = """
                             <div class="video-channel">👤 ${escapeHtml(vid.author)}</div>
                             <div class="video-actions">
                                 <button class="btn-card primary" onclick="copyTranscriptDirectly('${vid.video_id}')">
-                                    📋 Kopyala
+                                    📋 Copy
                                 </button>
                                 <button class="btn-card" onclick="openTranscriptSidebar('${vid.video_id}', '${encodeURIComponent(vid.title)}')">
-                                    🔍 Detay
+                                    🔍 Detail
                                 </button>
                             </div>
                         </div>
@@ -856,9 +998,9 @@ HTML_TEMPLATE = """
             });
 
             msg.innerHTML = `
-                <div class="message-meta">🤖 Transkriptör Asistanı</div>
+                <div class="message-meta">🤖 Transkriptor Assistant</div>
                 <div class="message-content">
-                    Ekran görüntünüzde <strong>${videos.length} adet video</strong> tespit ettim ve eşleştirdim:
+                    I found and matched <strong>${videos.length} video(s)</strong> from your screenshot:
                     <div class="videos-grid">
                         ${videosHtml}
                     </div>
@@ -872,18 +1014,18 @@ HTML_TEMPLATE = """
         window.copyTranscriptDirectly = async function(videoId) {
             const transcript = loadedTranscripts[videoId];
             if (!transcript || transcript.length === 0) {
-                showToast("Altyazı önbellekte bulunamadı!", "warning");
+                showToast("Transcript not found in cache!", "warning");
                 return;
             }
             
             try {
                 const fullText = transcript.map(l => l.text).join(' ');
                 await navigator.clipboard.writeText(fullText);
-                showToast("Altyazı metni başarıyla panoya kopyalandı!");
+                showToast("Transcript copied to clipboard successfully!");
             } catch (e) {
                 const success = fallbackCopyTextToClipboard(transcript.map(l => l.text).join(' '));
                 if (!success) {
-                    showToast("Pano erişim hatası! Lütfen 'Detay' panelinden kopyalayın.", "warning");
+                    showToast("Clipboard access error! Please copy from the 'Detail' panel.", "warning");
                 }
             }
         };
@@ -915,7 +1057,7 @@ HTML_TEMPLATE = """
                 activeTranscript = transcript;
                 renderSidebarLines(transcript, videoId);
             } else {
-                sidebarLines.innerHTML = `<div style='color:#ef4444'>Altyazı önbellekte bulunamadı!</div>`;
+                sidebarLines.innerHTML = `<div style='color:#ef4444'>Transcript not found in cache!</div>`;
             }
         };
 
@@ -956,7 +1098,7 @@ HTML_TEMPLATE = """
             if (!activeTranscript.length) return;
             const fullText = activeTranscript.map(l => l.text).join(' ');
             navigator.clipboard.writeText(fullText);
-            showToast("Bütün metin kopyalandı!");
+            showToast("Full transcript copied!");
         });
 
         btnDownloadTranscriptTxt.addEventListener('click', () => {
@@ -965,7 +1107,7 @@ HTML_TEMPLATE = """
             activeTranscript.forEach(l => {
                 output += `[${formatTime(l.start)}] ${l.text}\n`;
             });
-            const filename = `${activeVideoTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_altyazi.txt`;
+            const filename = `${activeVideoTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`;
             
             const blob = new Blob([output], { type: 'text/plain;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
@@ -1056,6 +1198,21 @@ def fetch_transcript_api_safely(video_id):
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+@app.route('/api/rate-limit-status')
+def rate_limit_status():
+    ip = get_client_ip()
+    allowed, remaining = check_rate_limit(ip)
+    
+    info = IP_LIMITS.get(ip, {'count': 0, 'banned_until': 0, 'first_request': time.time()})
+    
+    return jsonify({
+        'ip': ip,
+        'count': min(info['count'], MAX_REQUESTS),
+        'max': MAX_REQUESTS,
+        'is_banned': not allowed,
+        'remaining_ban': remaining
+    })
+
 @app.route('/api/transcript', methods=['POST'])
 def get_transcript():
     data = request.json or {}
@@ -1066,14 +1223,14 @@ def get_transcript():
         if len(url) == 11 and re.match(r'^[a-zA-Z0-9_-]+$', url):
             video_id = url
         else:
-            return jsonify({'status': 'error', 'message': 'Geçersiz YouTube URL veya Video ID!'})
+            return jsonify({'status': 'error', 'message': 'Invalid YouTube URL or Video ID!'})
             
     transcript_data = fetch_transcript_api_safely(video_id)
     if not transcript_data:
-        return jsonify({'status': 'error', 'message': 'Altyazılar çekilemedi (Videoda altyazı desteği kapalı olabilir).'})
+        return jsonify({'status': 'error', 'message': 'Could not retrieve subtitles (Subtitles might be disabled on this video).'})
 
-    video_title = "YouTube Videosu"
-    video_author = "YouTube Kanalı"
+    video_title = "YouTube Video"
+    video_author = "YouTube Channel"
     video_thumb = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
     
     try:
@@ -1097,11 +1254,22 @@ def get_transcript():
 
 @app.route('/api/ocr', methods=['POST'])
 def process_ocr():
+    # 1. Rate Limit Validation
+    ip = get_client_ip()
+    allowed, remaining = check_rate_limit(ip)
+    if not allowed:
+        return jsonify({'status': 'error', 'message': f'IP Banned. Please wait {remaining} seconds.'}), 429
+        
+    # Increment rate limit count
+    success, ban_time = increment_rate_limit(ip)
+    if not success:
+        return jsonify({'status': 'error', 'message': f'IP Banned. Too many requests.'}), 429
+
     data = request.json or {}
     image_base64 = data.get('image', '')
     
     if not image_base64:
-        return jsonify({'status': 'error', 'message': 'Görüntü verisi alınamadı!'})
+        return jsonify({'status': 'error', 'message': 'Could not retrieve image data!'})
         
     try:
         if ',' in image_base64:
@@ -1129,7 +1297,7 @@ def process_ocr():
             print("--- RAW OCR TEXT ---\n", parsed_text)
             
             if not parsed_text:
-                return jsonify({'status': 'error', 'message': 'Ekran görüntüsünde okunabilir bir metin bulunamadı!'})
+                return jsonify({'status': 'error', 'message': 'No readable text found in the screenshot!'})
             
             # 1. COLUMN SPLITTING
             column_split_lines = []
@@ -1277,16 +1445,17 @@ def process_ocr():
                         'results': final_results
                     })
                     
-                return jsonify({'status': 'error', 'message': f"Tarama metinleri: {queries}. Eşleşen video bulunamadı!"})
+                return jsonify({'status': 'error', 'message': f"Scanned search text: {queries}. No matching video found!"})
         else:
-            return jsonify({'status': 'error', 'message': 'OCR sunucusu resmi okuyamadı.'})
+            return jsonify({'status': 'error', 'message': 'OCR server failed to read the image.'})
             
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f"Sistem hatası: {str(e)}"})
+        return jsonify({'status': 'error', 'message': f"System error: {str(e)}"})
 
 if __name__ == '__main__':
     print("----------------------------------------------------------------")
-    print("Transkriptör Chat sunucusu başarıyla yükseltildi!")
-    print("Lütfen tarayıcınızdan http://127.0.0.1:5000 adresine gidin.")
+    print("Transkriptor Chat server successfully started!")
+    print("Please open http://127.0.0.1:5000 in your browser.")
     print("----------------------------------------------------------------")
     app.run(debug=True, port=5000)
+
