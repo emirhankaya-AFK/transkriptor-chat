@@ -1210,8 +1210,8 @@ def fetch_transcript_via_proxies(video_id):
         
     random.shuffle(proxies_list)
     
-    # Try the first 30 proxies
-    for idx, proxy_ip in enumerate(proxies_list[:30], 1):
+    # Try all proxies in the list (unlimited)
+    for idx, proxy_ip in enumerate(proxies_list, 1):
         proxy_url = f"http://{proxy_ip}"
         proxies_config = {'http': proxy_url, 'https': proxy_url}
         try:
