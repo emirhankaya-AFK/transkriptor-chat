@@ -3,17 +3,47 @@ import os
 import base64
 import requests
 import time
+import http.cookiejar
 from flask import Flask, request, jsonify, render_template_string
 from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
 
 app = Flask(__name__)
 
+def load_youtube_cookies_session():
+    session = requests.Session()
+    # Search for cookies.txt in common directories
+    candidate_paths = [
+        'cookies.txt',
+        'transkriptor-chat-app/cookies.txt',
+        os.path.join(os.path.dirname(__file__), 'cookies.txt') if '__file__' in globals() else 'cookies.txt',
+        os.path.join(os.path.dirname(__file__), 'transkriptor-chat-app', 'cookies.txt') if '__file__' in globals() else 'transkriptor-chat-app/cookies.txt'
+    ]
+    cookie_file = None
+    for p in candidate_paths:
+        if os.path.exists(p):
+            cookie_file = p
+            break
+            
+    if cookie_file:
+        try:
+            cj = http.cookiejar.MozillaCookieJar(cookie_file)
+            cj.load(ignore_discard=True, ignore_expires=True)
+            session.cookies = cj
+            print(f"Successfully loaded YouTube cookies from {cookie_file}")
+        except Exception as e:
+            print(f"Failed to load cookies from {cookie_file}: {e}")
+    else:
+        print("No cookies.txt found. Proceeding without cookies.")
+    return session, cookie_file
+
 # IP-based rate limiting configuration
 IP_LIMITS = {}
-MAX_REQUESTS = 5
+IS_LOCAL = os.environ.get('PORT') is None and os.environ.get('RENDER') is None
+MAX_REQUESTS = 999999 if IS_LOCAL else 5
 BAN_DURATION = 300  # 5 minutes in seconds
 WINDOW_DURATION = 300  # 5 minutes in seconds
+
 
 def get_client_ip():
     return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
@@ -795,9 +825,9 @@ HTML_TEMPLATE = """
                 for (let file of clipboardData.files) {
                     if (file.type.startsWith('image/')) {
                         imageFound = true;
-                        processImageFile(file);
                         e.preventDefault();
                         e.stopPropagation();
+                        processImageFile(file);
                         break;
                     }
                 }
@@ -809,9 +839,9 @@ HTML_TEMPLATE = """
                         const blob = item.getAsFile();
                         if (blob) {
                             imageFound = true;
-                            processImageFile(blob);
                             e.preventDefault();
                             e.stopPropagation();
+                            processImageFile(blob);
                             break;
                         }
                     }
@@ -1131,11 +1161,15 @@ def extract_video_id(url):
 
 def search_youtube(query):
     try:
+        _, cookie_file = load_youtube_cookies_session()
         ydl_opts = {
             'quiet': True,
             'default_search': 'ytsearch1',
             'skip_download': True,
         }
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+            
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(query, download=False)
             if 'entries' in info and len(info['entries']) > 0:
@@ -1150,29 +1184,106 @@ def search_youtube(query):
         print("YT Search Error:", e)
     return None
 
+def fetch_transcript_via_proxies(video_id):
+    import socket
+    import random
+    
+    # Store original timeout to restore it later
+    orig_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(3) # Set 3s timeout for fast proxy testing
+    
+    print(f"Attempting proxy rotation fallback for transcript of {video_id}...")
+    try:
+        url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            socket.setdefaulttimeout(orig_timeout)
+            return None
+        proxies_list = [line.strip() for line in res.text.split('\n') if line.strip()]
+        if not proxies_list:
+            socket.setdefaulttimeout(orig_timeout)
+            return None
+    except Exception as e:
+        print("Failed to load fallback proxies:", e)
+        socket.setdefaulttimeout(orig_timeout)
+        return None
+        
+    random.shuffle(proxies_list)
+    
+    # Try the first 30 proxies
+    for idx, proxy_ip in enumerate(proxies_list[:30], 1):
+        proxy_url = f"http://{proxy_ip}"
+        proxies_config = {'http': proxy_url, 'https': proxy_url}
+        try:
+            session = requests.Session()
+            session.proxies = proxies_config
+            api = YouTubeTranscriptApi(http_client=session)
+            transcript_data = api.fetch(video_id, languages=('tr', 'en'))
+            if transcript_data:
+                print(f"SUCCESS! Retrieved transcript using proxy {proxy_url}!")
+                
+                formatted_transcript = []
+                if hasattr(transcript_data, 'to_raw_data'):
+                    raw_data = transcript_data.to_raw_data()
+                elif hasattr(transcript_data, 'snippets'):
+                    raw_data = []
+                    for snippet in transcript_data.snippets:
+                        raw_data.append({
+                            'text': snippet.text,
+                            'start': snippet.start,
+                            'duration': snippet.duration
+                        })
+                elif isinstance(transcript_data, list):
+                    raw_data = transcript_data
+                else:
+                    raw_data = list(transcript_data)
+                    
+                for entry in raw_data:
+                    if isinstance(entry, dict):
+                        formatted_transcript.append({
+                            'text': entry.get('text', ''),
+                            'start': entry.get('start', 0.0),
+                            'duration': entry.get('duration', 0.0)
+                        })
+                
+                socket.setdefaulttimeout(orig_timeout)
+                return formatted_transcript
+        except Exception as e:
+            # Silent fallback
+            pass
+            
+    print("All fallback proxies failed.")
+    socket.setdefaulttimeout(orig_timeout)
+    return None
+
 def fetch_transcript_api_safely(video_id):
     """Instantiates api and fetches transcripts, formatting FetchedTranscript to JSON list of dicts."""
     try:
-        api = YouTubeTranscriptApi()
+        session, _ = load_youtube_cookies_session()
+        api = YouTubeTranscriptApi(http_client=session)
         transcript_data = None
         
         # 1. Fetch transcript using new instance-based fetch method
         try:
             transcript_data = api.fetch(video_id, languages=('tr', 'en'))
-        except Exception:
+        except Exception as e1:
+            print(f"Primary fetch failed for {video_id}: {e1}")
             try:
                 transcript_list = api.list(video_id)
                 transcript = next(iter(transcript_list))
                 transcript_data = transcript.fetch()
-            except Exception:
-                return None
+            except Exception as e2:
+                print(f"Fallback list/fetch failed for {video_id}: {e2}. Trying proxy rotation...")
+                return fetch_transcript_via_proxies(video_id)
                 
         if not transcript_data:
             return None
             
         # 2. Convert custom FetchedTranscript object into serializable list of dicts!
         formatted_transcript = []
-        if hasattr(transcript_data, 'snippets'):
+        if hasattr(transcript_data, 'to_raw_data'):
+            return transcript_data.to_raw_data()
+        elif hasattr(transcript_data, 'snippets'):
             # Modern 1.2.4 FetchedTranscript object with snippet objects
             for snippet in transcript_data.snippets:
                 formatted_transcript.append({
@@ -1252,6 +1363,15 @@ def get_transcript():
         'transcript': transcript_data
     })
 
+def is_good_match(query, video_title):
+    q_words = [w for w in re.findall(r'[a-zA-Z0-9çğıöşüÇĞİÖŞÜ]+', query.lower()) if len(w) > 2]
+    t_words = set(re.findall(r'[a-zA-Z0-9çğıöşüÇĞİÖŞÜ]+', video_title.lower()))
+    if not q_words:
+        return True
+    matches = sum(1 for w in q_words if w in t_words)
+    required = 2 if len(q_words) >= 3 else 1
+    return matches >= required
+
 @app.route('/api/ocr', methods=['POST'])
 def process_ocr():
     # 1. Rate Limit Validation
@@ -1314,17 +1434,19 @@ def process_ocr():
             # Filter duration and index noise
             clean_lines = []
             for line in column_split_lines:
-                line_cleaned = re.sub(r'\b\d{1,2}:\d{2}\b', '', line)
+                line_cleaned = re.sub(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', '', line)
                 line_cleaned = re.sub(r'^\d+$', '', line_cleaned)
                 line_cleaned = line_cleaned.strip()
                 if len(line_cleaned) > 1:
                     clean_lines.append(line_cleaned)
             
-            # --- ULTIMATE 2-LINE TITLE BOUNDARY ALGORITHM ---
+            # --- ULTIMATE ROBUST ANCHOR QUERY GENERATOR ---
             meta_indicators = ['views', 'izlenme', 'görüntüleme', 'ago', 'önce', '•', 'view', 'day', 'hour', 'week', 'month', 'year', 'gün', 'saat', 'hafta', 'ay', 'yıl']
             
-            queries = []
+            final_results = []
             
+            # Find all anchors
+            anchors = []
             for i, line in enumerate(clean_lines):
                 is_anchor = False
                 if '•' in line:
@@ -1335,88 +1457,81 @@ def process_ocr():
                     has_time = any(term in line.lower() for term in ['ago', 'önce', 'day', 'hour', 'week', 'month', 'year', 'gün', 'saat', 'hafta', 'ay', 'yıl'])
                     if has_views and has_time:
                         is_anchor = True
-                    
                 if is_anchor:
-                    # 1. Extract Channel Name
-                    channel_name = ""
-                    channel_match = re.search(r'^(.*?)\s*(?:•|\b\d+(?:\.\d+)?[KMB]?(?:\s*views|\s*görüntüleme|\s*izlenme|\s*izleyici|\s*görüntülenmesi))', line, re.IGNORECASE)
-                    if channel_match:
-                        channel_name = channel_match.group(1).strip()
-                        channel_name = re.sub(r'[|$?!\(\)\[\]\-\*\:]', '', channel_name).strip()
-                    
-                    # 2. Extract Video Title strictly limited to 2 preceding lines
-                    title_lines = []
-                    
-                    if i > 0:
-                        prev_1 = clean_lines[i-1]
-                        is_prev_1_meta = any(term in prev_1.lower() for term in meta_indicators) or re.search(r'\b\d+[KMB]\b', prev_1)
-                        if not is_prev_1_meta and len(prev_1) > 2:
-                            title_lines.insert(0, prev_1)
-                            
-                            if i > 1:
-                                prev_2 = clean_lines[i-2]
-                                is_prev_2_meta = any(term in prev_2.lower() for term in meta_indicators) or re.search(r'\b\d+[KMB]\b', prev_2)
-                                if not is_prev_2_meta and len(prev_2) > 4 and not prev_2.isdigit():
-                                    title_lines.insert(0, prev_2)
-                    
-                    if title_lines:
-                        title_query = " ".join(title_lines).strip()
-                        title_query = re.sub(r'[|$?!\(\)\[\]\-\*\:]', ' ', title_query)
-                        title_query = re.sub(r'\s+', ' ', title_query).strip()
-                        
-                        words = title_query.split()
-                        if len(words) > 8:
-                            title_query = " ".join(words[:8])
-                        
-                        primary_query = f"{channel_name} {title_query}".strip()
-                        secondary_query = title_query
-                        
-                        if len(primary_query) > 5 and primary_query not in queries:
-                            queries.append((primary_query, secondary_query))
+                    anchors.append(i)
             
-            if not queries:
-                print("No metadata anchors found. Falling back to line chunks.")
-                chunk = []
-                for line in clean_lines:
-                    if len(line) > 12:
-                        chunk.append(line)
-                        if len(chunk) == 2:
-                            q = " ".join(chunk)
-                            queries.append((q, q))
-                            chunk = []
-                if chunk:
-                    q = " ".join(chunk)
-                    queries.append((q, q))
+            print("Detected anchors indices:", anchors)
             
-            print("Final Processed Search Queries Matrix:", queries)
-            
-            # YouTube search & PRE-FETCH execution
-            final_results = []
-            for primary_q, secondary_q in queries[:3]: # Limit to top 3 videos
-                clean_primary = re.sub(r'[\'\"]', '', primary_q).strip()
-                clean_secondary = re.sub(r'[\'\"]', '', secondary_q).strip()
+            # Process each anchor
+            for anchor_idx in anchors[:4]:  # limit to top 4 detected videos
+                anchor_line = clean_lines[anchor_idx]
                 
-                print(f"Searching primary: '{clean_primary}'")
-                video_meta = search_youtube(clean_primary)
+                # 1. Extract Channel Name from anchor line
+                channel_name = ""
+                channel_match = re.search(r'^(.*?)\s*(?:•|\b\d+(?:\.\d+)?[KMB]?(?:\s*views|\s*görüntüleme|\s*izlenme|\s*izleyici|\s*görüntülenmesi))', anchor_line, re.IGNORECASE)
+                if channel_match:
+                    channel_name = channel_match.group(1).strip()
+                    channel_name = re.sub(r'[|$?!\(\)\[\]\-\*\:\•]', '', channel_name).strip()
                 
-                if not video_meta:
-                    print(f"Searching fallback 1 (title only): '{clean_secondary}'")
-                    video_meta = search_youtube(clean_secondary)
-                    
-                if not video_meta:
-                    words = clean_secondary.split()
-                    if len(words) > 4:
-                        fallback_q = " ".join(words[:4])
-                        print(f"Searching fallback 2 (truncated): '{fallback_q}'")
-                        video_meta = search_youtube(fallback_q)
+                # 2. Extract preceding candidate title lines
+                preceding = []
+                for offset in range(1, 5):
+                    idx = anchor_idx - offset
+                    if idx >= 0:
+                        line_val = clean_lines[idx]
+                        is_meta = any(term in line_val.lower() for term in meta_indicators) or re.search(r'\b\d+[KMB]\b', line_val)
+                        is_noise = re.match(r'^(?:\d{1,2}:)?\d{1,2}:\d{2}$', line_val) or line_val.isdigit()
+                        if not is_meta and not is_noise and len(line_val) > 2:
+                            cleaned_val = re.sub(r'[|$?!\(\)\[\]\-\*\:]', ' ', line_val).strip()
+                            if cleaned_val:
+                                preceding.append(cleaned_val)
                 
-                # --- SOLID PRE-FETCH & SERIALIZATION MATCH ---
-                if video_meta:
-                    transcript_data = fetch_transcript_api_safely(video_meta['video_id'])
-                    if transcript_data:
-                        # Append the cleanly serialized JSON list of dicts!
-                        video_meta['transcript'] = transcript_data
-                        final_results.append(video_meta)
+                candidates = []
+                if len(preceding) == 1:
+                    candidates.append(f"{channel_name} {preceding[0]}")
+                    candidates.append(preceding[0])
+                elif len(preceding) == 2:
+                    candidates.append(f"{channel_name} {preceding[1]} {preceding[0]}")
+                    candidates.append(f"{preceding[1]} {preceding[0]}")
+                    candidates.append(f"{channel_name} {preceding[0]}")
+                    candidates.append(preceding[0])
+                elif len(preceding) >= 3:
+                    candidates.append(f"{channel_name} {preceding[2]} {preceding[1]} {preceding[0]}")
+                    candidates.append(f"{preceding[2]} {preceding[1]} {preceding[0]}")
+                    candidates.append(f"{channel_name} {preceding[1]} {preceding[0]}")
+                    candidates.append(f"{preceding[1]} {preceding[0]}")
+                
+                clean_candidates = []
+                for cand in candidates:
+                    cand_clean = re.sub(r'\s+', ' ', cand).strip()
+                    if cand_clean:
+                        words = cand_clean.split()
+                        if len(words) > 12:
+                            cand_clean = " ".join(words[:12])
+                        if cand_clean not in clean_candidates:
+                            clean_candidates.append(cand_clean)
+                
+                print(f"Anchor {anchor_idx} clean candidates:", clean_candidates)
+                
+                matched_video = None
+                for q in clean_candidates:
+                    print(f"Trying search: '{q}'")
+                    video_meta = search_youtube(q)
+                    if video_meta and is_good_match(q, video_meta['title']):
+                        transcript_data = fetch_transcript_api_safely(video_meta['video_id'])
+                        if transcript_data:
+                            video_meta['transcript'] = transcript_data
+                        else:
+                            video_meta['transcript'] = [{
+                                'text': '[Kritik Hata: YouTube bu IP adresinden alt yazı çekilmesini engelledi (429 Too Many Requests) veya alt yazılar devre dışı. Lütfen dış bağlantıyı kullanarak alt yazıyı alın ve buraya yapıştırın.]',
+                                'start': 0.0,
+                                'duration': 0.0
+                            }]
+                        matched_video = video_meta
+                        break
+                        
+                if matched_video:
+                    final_results.append(matched_video)
             
             if final_results:
                 return jsonify({
@@ -1427,7 +1542,7 @@ def process_ocr():
                 print("Sequential search returned 0 results. Executing raw line search...")
                 for line in clean_lines[:3]:
                     is_meta = any(term in line.lower() for term in meta_indicators) or re.search(r'\b\d+[KMB]\b', line)
-                    is_duration = re.match(r'^\d{1,2}:\d{2}$', line) or line.isdigit()
+                    is_duration = re.match(r'^(?:\d{1,2}:)?\d{1,2}:\d{2}$', line) or line.isdigit()
                     if not is_meta and not is_duration and len(line) > 12:
                         raw_q = re.sub(r'[|$?!\(\)\[\]\-\*\:]', ' ', line).strip()
                         print(f"Last resort search: '{raw_q}'")
@@ -1436,9 +1551,15 @@ def process_ocr():
                             transcript_data = fetch_transcript_api_safely(video_meta['video_id'])
                             if transcript_data:
                                 video_meta['transcript'] = transcript_data
-                                final_results.append(video_meta)
-                                if len(final_results) >= 3:
-                                    break
+                            else:
+                                video_meta['transcript'] = [{
+                                    'text': '[Kritik Hata: YouTube bu IP adresinden alt yazı çekilmesini engelledi (429 Too Many Requests) veya alt yazılar devre dışı. Lütfen dış bağlantıyı kullanarak alt yazıyı alın ve buraya yapıştırın.]',
+                                    'start': 0.0,
+                                    'duration': 0.0
+                                }]
+                            final_results.append(video_meta)
+                            if len(final_results) >= 3:
+                                break
                                 
                 if final_results:
                     return jsonify({
@@ -1446,7 +1567,7 @@ def process_ocr():
                         'results': final_results
                     })
                     
-                return jsonify({'status': 'error', 'message': f"Scanned search text: {queries}. No matching video found!"})
+                return jsonify({'status': 'error', 'message': f"No matching video found!"})
         else:
             error_details = ocr_result.get('ErrorMessage') or ocr_result.get('ErrorMessageDescription') or 'OCR server failed to read the image.'
             if isinstance(error_details, list):
@@ -1461,5 +1582,5 @@ if __name__ == '__main__':
     print("Transkriptor Chat server successfully started!")
     print("Please open http://127.0.0.1:5000 in your browser.")
     print("----------------------------------------------------------------")
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)
 
