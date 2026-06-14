@@ -8,7 +8,17 @@ from flask import Flask, request, jsonify, render_template_string
 from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
 
+# Monkey patch requests Session.request to force a default timeout of 2.5 seconds.
+# This prevents third-party libraries like youtube_transcript_api from hanging on dead/slow proxies.
+orig_request = requests.Session.request
+def timed_request(self, method, url, *args, **kwargs):
+    if 'timeout' not in kwargs or kwargs['timeout'] is None:
+        kwargs['timeout'] = 2.5
+    return orig_request(self, method, url, *args, **kwargs)
+requests.Session.request = timed_request
+
 app = Flask(__name__)
+WORKING_PROXY = None
 
 def load_youtube_cookies_session():
     session = requests.Session()
@@ -1168,7 +1178,7 @@ def search_youtube_via_proxies(query):
     
     print(f"Attempting proxy rotation fallback for search: {query}...")
     try:
-        url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+        url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
         res = requests.get(url, timeout=5)
         if res.status_code != 200:
             socket.setdefaulttimeout(orig_timeout)
@@ -1242,16 +1252,57 @@ def search_youtube(query):
     return None
 
 def fetch_transcript_via_proxies(video_id):
+    global WORKING_PROXY
     import socket
     import random
     
-    # Store original timeout to restore it later
     orig_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(3) # Set 3s timeout for fast proxy testing
     
+    # 1. Try cached working proxy first
+    if WORKING_PROXY:
+        print(f"Trying cached working proxy: {WORKING_PROXY}...")
+        socket.setdefaulttimeout(2.5) # Allow slightly more time for the cached one
+        try:
+            session = requests.Session()
+            session.proxies = {'http': WORKING_PROXY, 'https': WORKING_PROXY}
+            api = YouTubeTranscriptApi(http_client=session)
+            transcript_data = api.fetch(video_id, languages=('tr', 'en'))
+            if transcript_data:
+                print(f"SUCCESS! Retrieved transcript using cached proxy {WORKING_PROXY}!")
+                formatted_transcript = []
+                if hasattr(transcript_data, 'to_raw_data'):
+                    raw_data = transcript_data.to_raw_data()
+                elif hasattr(transcript_data, 'snippets'):
+                    raw_data = []
+                    for snippet in transcript_data.snippets:
+                        raw_data.append({
+                            'text': snippet.text,
+                            'start': snippet.start,
+                            'duration': snippet.duration
+                        })
+                elif isinstance(transcript_data, list):
+                    raw_data = transcript_data
+                else:
+                    raw_data = list(transcript_data)
+                    
+                for entry in raw_data:
+                    if isinstance(entry, dict):
+                        formatted_transcript.append({
+                            'text': entry.get('text', ''),
+                            'start': entry.get('start', 0.0),
+                            'duration': entry.get('duration', 0.0)
+                        })
+                socket.setdefaulttimeout(orig_timeout)
+                return formatted_transcript
+        except Exception as e:
+            print(f"Cached proxy {WORKING_PROXY} failed: {e}. Clearing cache.")
+            WORKING_PROXY = None
+            
+    # 2. Cache failed or not set. Try proxy rotation
+    socket.setdefaulttimeout(1.5) # Set 1.5s timeout for fast proxy rotation checks
     print(f"Attempting proxy rotation fallback for transcript of {video_id}...")
     try:
-        url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+        url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
         res = requests.get(url, timeout=5)
         if res.status_code != 200:
             socket.setdefaulttimeout(orig_timeout)
@@ -1267,8 +1318,8 @@ def fetch_transcript_via_proxies(video_id):
         
     random.shuffle(proxies_list)
     
-    # Try all proxies in the list (unlimited)
-    for idx, proxy_ip in enumerate(proxies_list, 1):
+    # Try up to 15 proxies to avoid freezing the server
+    for idx, proxy_ip in enumerate(proxies_list[:15], 1):
         proxy_url = f"http://{proxy_ip}"
         proxies_config = {'http': proxy_url, 'https': proxy_url}
         try:
@@ -1278,6 +1329,8 @@ def fetch_transcript_via_proxies(video_id):
             transcript_data = api.fetch(video_id, languages=('tr', 'en'))
             if transcript_data:
                 print(f"SUCCESS! Retrieved transcript using proxy {proxy_url}!")
+                # Save as working proxy for next requests
+                WORKING_PROXY = proxy_url
                 
                 formatted_transcript = []
                 if hasattr(transcript_data, 'to_raw_data'):
@@ -1306,7 +1359,6 @@ def fetch_transcript_via_proxies(video_id):
                 socket.setdefaulttimeout(orig_timeout)
                 return formatted_transcript
         except Exception as e:
-            # Silent fallback
             pass
             
     print("All fallback proxies failed.")
@@ -1402,7 +1454,13 @@ def get_transcript():
     video_thumb = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
     
     try:
-        ydl_opts = {'quiet': True, 'skip_download': True}
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'socket_timeout': 5
+        }
+        if WORKING_PROXY:
+            ydl_opts['proxy'] = WORKING_PROXY
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             video_title = info.get('title', video_title)
