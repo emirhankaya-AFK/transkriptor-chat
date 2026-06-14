@@ -1159,6 +1159,61 @@ def extract_video_id(url):
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
+def search_youtube_via_proxies(query):
+    import socket
+    import random
+    
+    orig_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(4) # Allow 4 seconds for DNS/TCP handshake
+    
+    print(f"Attempting proxy rotation fallback for search: {query}...")
+    try:
+        url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            socket.setdefaulttimeout(orig_timeout)
+            return None
+        proxies_list = [line.strip() for line in res.text.split('\n') if line.strip()]
+        if not proxies_list:
+            socket.setdefaulttimeout(orig_timeout)
+            return None
+    except Exception as e:
+        print("Failed to load proxies for search:", e)
+        socket.setdefaulttimeout(orig_timeout)
+        return None
+        
+    random.shuffle(proxies_list)
+    
+    # Try first 30 proxies
+    for idx, proxy_ip in enumerate(proxies_list[:30], 1):
+        proxy_url = f"http://{proxy_ip}"
+        ydl_opts = {
+            'quiet': True,
+            'default_search': 'ytsearch1',
+            'skip_download': True,
+            'js_runtimes': {'node': {}},
+            'proxy': proxy_url
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if 'entries' in info and len(info['entries']) > 0:
+                    entry = info['entries'][0]
+                    print(f"SUCCESS! Searched YouTube using proxy {proxy_url}")
+                    socket.setdefaulttimeout(orig_timeout)
+                    return {
+                        'video_id': entry['id'],
+                        'title': entry['title'],
+                        'author': entry.get('uploader', 'Unknown Channel'),
+                        'thumbnail': entry.get('thumbnail', f"https://img.youtube.com/vi/{entry['id']}/hqdefault.jpg")
+                    }
+        except Exception as e:
+            pass
+            
+    print("All proxies failed for search.")
+    socket.setdefaulttimeout(orig_timeout)
+    return None
+
 def search_youtube(query):
     try:
         _, cookie_file = load_youtube_cookies_session()
@@ -1166,6 +1221,7 @@ def search_youtube(query):
             'quiet': True,
             'default_search': 'ytsearch1',
             'skip_download': True,
+            'js_runtimes': {'node': {}}
         }
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
@@ -1181,7 +1237,8 @@ def search_youtube(query):
                     'thumbnail': entry.get('thumbnail', f"https://img.youtube.com/vi/{entry['id']}/hqdefault.jpg")
                 }
     except Exception as e:
-        print("YT Search Error:", e)
+        print("YT Search Error:", e, "Trying proxy rotation fallback...")
+        return search_youtube_via_proxies(query)
     return None
 
 def fetch_transcript_via_proxies(video_id):
