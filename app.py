@@ -92,12 +92,15 @@ def increment_rate_limit(ip):
 # Premium glassmorphic Chat UI
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transkriptor Chat - Multi-Video Subtitle Assistant</title>
+    <title>Transkriptör Chat - Çoklu Video Altyazı Asistanı</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    {% if logo_base64 %}
+    <link rel="icon" type="image/png" href="data:image/png;base64,{{ logo_base64 }}">
+    {% endif %}
     <style>
         :root {
             --bg-color: #0b0f19;
@@ -133,33 +136,24 @@ HTML_TEMPLATE = """
             position: relative;
         }
 
-        .rate-limit-banner {
-            width: 100%;
-            padding: 0.6rem 1rem;
-            font-size: 0.85rem;
-            font-weight: 600;
-            text-align: center;
-            transition: all 0.3s ease;
-            z-index: 1000;
-            background: rgba(16, 185, 129, 0.15);
-            border-bottom: 1px solid rgba(16, 185, 129, 0.3);
-            color: #34d399;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 0.5rem;
+        ::-webkit-scrollbar {
+            width: 8px;
         }
-
-        .rate-limit-banner.banned {
-            background: rgba(239, 68, 68, 0.15);
-            border-bottom: 1px solid rgba(239, 68, 68, 0.3);
-            color: #f87171;
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .app-container {
             display: flex;
             flex: 1;
-            height: calc(100vh - 110px);
+            height: calc(100vh - 70px);
             overflow: hidden;
             position: relative;
         }
@@ -197,6 +191,25 @@ HTML_TEMPLATE = """
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
+        }
+
+        .btn-settings {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .btn-settings:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: rotate(45deg);
         }
 
         .chat-container {
@@ -315,7 +328,6 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             transition: all 0.2s ease;
-            flex-shrink: 0;
         }
 
         .btn-attach:hover {
@@ -335,7 +347,6 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: center;
             transition: all 0.2s ease;
-            flex-shrink: 0;
         }
 
         .btn-send:hover {
@@ -463,13 +474,23 @@ HTML_TEMPLATE = """
             background: var(--primary-hover);
         }
 
+        .btn-card.warning-btn {
+            background: rgba(245, 158, 11, 0.2);
+            border-color: rgba(245, 158, 11, 0.4);
+            color: #fbbf24;
+        }
+
+        .btn-card.warning-btn:hover {
+            background: rgba(245, 158, 11, 0.3);
+            border-color: rgba(245, 158, 11, 0.6);
+        }
+
         .btn-card:hover {
             background: rgba(255,255,255,0.1);
         }
 
         .sidebar {
             width: 450px;
-            max-width: 450px;
             border-left: 1px solid var(--border-color);
             background: rgba(17, 25, 40, 0.75);
             backdrop-filter: blur(20px);
@@ -478,12 +499,10 @@ HTML_TEMPLATE = """
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 50;
             overflow: hidden;
-            flex-shrink: 0;
         }
 
         .sidebar.closed {
             width: 0;
-            max-width: 0;
             border-left: none;
         }
 
@@ -620,6 +639,58 @@ HTML_TEMPLATE = """
             animation: pulse 1.5s infinite;
         }
 
+        .settings-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(8, 12, 20, 0.6);
+            backdrop-filter: blur(10px);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.25s ease-in-out;
+        }
+
+        .settings-modal-card {
+            background: rgba(15, 23, 42, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 2.25rem;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(99, 102, 241, 0.15);
+            position: relative;
+            backdrop-filter: blur(20px);
+            animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .settings-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 0.85rem 1rem;
+            color: white;
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .settings-input:focus {
+            border-color: var(--primary);
+            background: rgba(255, 255, 255, 0.06);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 0.6; }
             50% { opacity: 1; }
@@ -633,19 +704,28 @@ HTML_TEMPLATE = """
 </head>
 <body>
 
-    <div class="rate-limit-banner" id="rateLimitBanner">
-        📷 Image OCR Limits: Checking status...
-    </div>
-
     <div class="drag-overlay" id="dragOverlay">
         <svg width="64" height="64" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"></path></svg>
-        <h2>Drop Screenshot Here</h2>
+        <h2>Ekran Görüntüsünü Buraya Bırakın</h2>
     </div>
 
     <header>
         <div class="logo">
-            <span>Transkriptor Chat</span>
-            <span class="badge">Stable JSON Output</span>
+            {% if logo_base64 %}
+            <img src="data:image/png;base64,{{ logo_base64 }}" alt="Logo" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1.5px solid rgba(255, 255, 255, 0.2); box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);">
+            {% endif %}
+            <span>Transkriptör Chat</span>
+            <span class="badge">Gemini OCR Aktif</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            {% if cookies_loaded %}
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; cursor: pointer; text-transform: none;" onclick="showCookiesHelp()">🍪 Çerezler: Aktif</span>
+            {% else %}
+            <span class="badge" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; cursor: pointer; text-transform: none;" onclick="showCookiesHelp()">🍪 Çerezler: Yüklenmedi (429 Riski)</span>
+            {% endif %}
+            <button class="btn-settings" id="btnOpenSettings" title="Uygulama Ayarları">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.43l-1.003.828c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.991l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.645-.869l.214-1.28z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </button>
         </div>
     </header>
 
@@ -653,15 +733,14 @@ HTML_TEMPLATE = """
         <div class="chat-container">
             <div class="messages-list" id="messagesList">
                 <div class="message bot">
-                    <div class="message-meta">🤖 Transkriptor Assistant</div>
+                    <div class="message-meta">🤖 Transkriptör Asistanı</div>
                     <div class="message-content">
-                        Hello! I am your multi-video transcript assistant.
+                        Merhaba! Ben sizin çoklu video transkript asistanınızım. 
                         <br><br>
-                        <strong>Stable Subtitle Pipeline Enabled:</strong>
+                        <strong>Kararlı Altyazı Aktarımı Devrede:</strong>
                         <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                            <li>Convert complex multi-layered subtitle structures to standard serializable JSON format.</li>
-                            <li>Allows seamless translation caching and transcript exports.</li>
-                            <li>Paste a YouTube video link directly or upload/paste a screenshot of videos to start!</li>
+                            <li>Sürüm 1.2.4'ün getirdiği karmaşık altyazı objeleri, tarayıcınızın okuyabileceği **standart listelere (JSON)** dönüştürüldü!</li>
+                            <li>Tüm dillerdeki videoların altyazıları artık hatasız olarak önbelleğe alınmakta ve kopyalanmaktadır.</li>
                         </ul>
                     </div>
                 </div>
@@ -669,12 +748,12 @@ HTML_TEMPLATE = """
 
             <div class="input-panel">
                 <div class="input-wrapper">
-                    <button class="btn-attach" id="btnAttach" title="Upload Screenshot">
+                    <button class="btn-attach" id="btnAttach" title="Ekran Görüntüsü Yükle">
                         <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"></path></svg>
                     </button>
                     <input type="file" id="fileSelector" accept="image/*" style="display: none;">
 
-                    <div class="rich-input" id="chatInput" contenteditable="true" placeholder="Paste a YouTube link or drag/paste screenshots here..."></div>
+                    <textarea class="rich-input" id="chatInput" placeholder="Bir YouTube linki yapıştırın veya doğrudan ekran görüntüsü kopyalayıp buraya Ctrl+V yapın..." style="resize: none; font-family: inherit; height: 28px; padding-top: 5px; padding-bottom: 5px; box-sizing: border-box;"></textarea>
                     
                     <button class="btn-send" id="btnSend">
                         <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"></path></svg>
@@ -683,34 +762,69 @@ HTML_TEMPLATE = """
                 <div class="input-hints">
                     <div class="paste-tip">
                         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                        Click in the input area and press Ctrl+V to paste link or screenshots directly!
+                        Görsel sürükleyip bırakabilir ya da 📎 butonunu kullanabilirsiniz. Ayarlar panelinden Gemini API anahtarınızı girerek OCR kalitesini artırın!
                     </div>
-                    <div>Local Engine Enabled</div>
+                    <div>Sınırsız Yerel Motor</div>
                 </div>
             </div>
         </div>
 
         <div class="sidebar closed" id="sidebar">
             <div class="sidebar-header">
-                <h3 id="sidebarTitle">Transcript Detail</h3>
+                <h3 id="sidebarTitle">Altyazı Detayı</h3>
                 <button class="btn-close" id="btnCloseSidebar">×</button>
             </div>
-            <div class="sidebar-content">
-                <div style="display: flex; gap: 0.5rem;">
+            <div class="sidebar-content" style="height: calc(100% - 60px); display: flex; flex-direction: column;">
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                     <button class="btn-card primary" id="btnCopyFullTranscript" style="padding: 0.75rem;">
-                        Copy Full Text
+                        Tüm Metni Kopyala
                     </button>
                     <button class="btn-card" id="btnDownloadTranscriptTxt" style="padding: 0.75rem;">
-                        Download TXT
+                        TXT İndir
                     </button>
                 </div>
-                <div class="transcript-lines" id="sidebarLines">
+                <button class="btn-card" id="btnEditTranscript" style="padding: 0.6rem; margin-bottom: 0.75rem; width: 100%; font-size: 0.85rem;" onclick="triggerSidebarEdit()">
+                    ✏️ Altyazıyı Düzenle / Manuel Yapıştır
+                </button>
+                <div class="transcript-lines" id="sidebarLines" style="flex: 1; overflow-y: auto;">
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="toast" id="toast">Copied to clipboard!</div>
+    <!-- Settings Modal -->
+    <div class="settings-modal-overlay" id="settingsModal">
+        <div class="settings-modal-card">
+            <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                ⚙️ Uygulama Ayarları
+            </h3>
+            
+            <div style="display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2rem;">
+                <div>
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.5rem;">OCR Analiz Motoru</label>
+                    <select id="settingOcrEngine" class="settings-input" style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-color);">
+                        <option value="gemini">Google Gemini 1.5 Flash (Önerilen - Kusursuz & Hızlı)</option>
+                        <option value="ocr_space">OCR.space Ücretsiz Genel API (Yavaş & Rate Limitli)</option>
+                    </select>
+                </div>
+                
+                <div id="geminiKeyContainer">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.5rem; display: flex; justify-content: space-between;">
+                        <span>Gemini API Key</span>
+                        <a href="https://aistudio.google.com/" target="_blank" style="color: var(--primary); text-decoration: none;">Ücretsiz Anahtar Al ↗</a>
+                    </label>
+                    <input type="password" id="settingGeminiKey" class="settings-input" placeholder="AIzaSy...">
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 0.75rem;">
+                <button class="btn-card primary" id="btnSaveSettings" style="padding: 0.75rem; font-size: 0.9rem; font-weight: 600;">💾 Ayarları Kaydet</button>
+                <button class="btn-card" id="btnCloseSettings" style="padding: 0.75rem; font-size: 0.9rem;">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">Kopyalandı!</div>
 
     <script>
         const chatInput = document.getElementById('chatInput');
@@ -728,55 +842,62 @@ HTML_TEMPLATE = """
         const fileSelector = document.getElementById('fileSelector');
         const dragOverlay = document.getElementById('dragOverlay');
 
+        // Settings Modal Elements
+        const btnOpenSettings = document.getElementById('btnOpenSettings');
+        const btnCloseSettings = document.getElementById('btnCloseSettings');
+        const btnSaveSettings = document.getElementById('btnSaveSettings');
+        const settingsModal = document.getElementById('settingsModal');
+        const settingOcrEngine = document.getElementById('settingOcrEngine');
+        const settingGeminiKey = document.getElementById('settingGeminiKey');
+
         // Local cache of pre-fetched transcripts
         const loadedTranscripts = {};
         let activeTranscript = [];
         let activeVideoTitle = "";
-        let banTimer = null;
 
-        // Rate Limit Status Banner Updater
-        async function updateRateLimitBanner() {
-            try {
-                const res = await fetch('/api/rate-limit-status');
-                const data = await res.json();
-                const banner = document.getElementById('rateLimitBanner');
-                
-                if (data.is_banned) {
-                    banner.className = 'rate-limit-banner banned';
-                    if (banTimer) clearInterval(banTimer);
-                    let remaining = data.remaining_ban;
-                    
-                    const updateText = () => {
-                        banner.innerHTML = `🚨 <strong>IP Ban 5 min</strong> | Your IP is banned. Try again in ${remaining}s.`;
-                    };
-                    updateText();
-                    
-                    banTimer = setInterval(() => {
-                        remaining--;
-                        if (remaining <= 0) {
-                            clearInterval(banTimer);
-                            updateRateLimitBanner();
-                        } else {
-                            updateText();
-                        }
-                    }, 1000);
-                } else {
-                    banner.className = 'rate-limit-banner ok';
-                    banner.innerHTML = `📷 Image OCR Requests: <strong>${data.count}/${data.max}</strong> (Over-limit triggers an IP Ban of 5 min).`;
-                }
-            } catch (e) {
-                console.error("Failed to fetch rate limit status:", e);
+        // Settings LocalStorage Management
+        const savedEngine = localStorage.getItem('ocr_engine') || 'ocr_space';
+        const savedKey = localStorage.getItem('gemini_api_key') || '';
+        settingOcrEngine.value = savedEngine;
+        settingGeminiKey.value = savedKey;
+
+        function toggleGeminiKeyVisibility() {
+            const container = document.getElementById('geminiKeyContainer');
+            if (settingOcrEngine.value === 'gemini') {
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
             }
         }
+        settingOcrEngine.addEventListener('change', toggleGeminiKeyVisibility);
+        toggleGeminiKeyVisibility();
 
-        // Initialize Rate Limit Banner Status
-        updateRateLimitBanner();
+        btnOpenSettings.addEventListener('click', () => {
+            settingsModal.style.display = 'flex';
+        });
+
+        btnCloseSettings.addEventListener('click', () => {
+            settingsModal.style.display = 'none';
+        });
+
+        btnSaveSettings.addEventListener('click', () => {
+            localStorage.setItem('ocr_engine', settingOcrEngine.value);
+            localStorage.setItem('gemini_api_key', settingGeminiKey.value);
+            settingsModal.style.display = 'none';
+            showToast("Ayarlar başarıyla kaydedildi!");
+        });
+
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.style.display = 'none';
+            }
+        });
 
         btnSend.addEventListener('click', () => {
-            const val = chatInput.textContent.trim();
+            const val = chatInput.value.trim();
             if (val) {
                 addUserMessage(val);
-                chatInput.innerHTML = "";
+                chatInput.value = "";
                 processTextQuery(val);
             }
         });
@@ -824,49 +945,110 @@ HTML_TEMPLATE = """
             }
         });
 
-        // --- SINGLE GLOBAL CAPTURING PASTE INTERCEPTOR ---
-        document.addEventListener('paste', function(e) {
-            const clipboardData = e.clipboardData || window.clipboardData;
-            if (!clipboardData) return;
-            
-            let imageFound = false;
-            
-            if (clipboardData.files && clipboardData.files.length > 0) {
-                for (let file of clipboardData.files) {
-                    if (file.type.startsWith('image/')) {
-                        imageFound = true;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        processImageFile(file);
-                        break;
-                    }
-                }
-            }
-            
-            if (!imageFound && clipboardData.items) {
-                for (let item of clipboardData.items) {
-                    if (item.type.indexOf('image') !== -1 || item.kind === 'file') {
-                        const blob = item.getAsFile();
-                        if (blob) {
+        // --- CLIPBOARD PASTE INTERCEPTOR (ONLY CAPTURES IMAGES) ---
+        function handlePasteEvent(e) {
+            try {
+                const clipboardData = e.clipboardData || window.clipboardData;
+                if (!clipboardData) return;
+                
+                let imageFound = false;
+                
+                // 1. Check files
+                if (clipboardData.files && clipboardData.files.length > 0) {
+                    for (let file of clipboardData.files) {
+                        if (file && file.type && file.type.startsWith('image/')) {
                             imageFound = true;
                             e.preventDefault();
                             e.stopPropagation();
-                            processImageFile(blob);
+                            processImageFile(file);
                             break;
                         }
                     }
                 }
+                
+                // 2. Check items
+                if (!imageFound && clipboardData.items) {
+                    for (let item of clipboardData.items) {
+                        if (item && ((item.type && item.type.indexOf('image') !== -1) || item.kind === 'file')) {
+                            const blob = item.getAsFile();
+                            if (blob) {
+                                imageFound = true;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                processImageFile(blob);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // 3. Removed Auto-submit text! Let the browser handle standard text paste into chatInput.
+            } catch (err) {
+                console.error("Paste intercept error:", err);
+            }
+        }
+
+        // Register directly on chatInput to intercept instantly when it is focused
+        chatInput.addEventListener('paste', handlePasteEvent);
+
+        // Register globally as capturing for other paste targets
+        document.addEventListener('paste', function(e) {
+            if (document.activeElement !== chatInput) {
+                handlePasteEvent(e);
             }
         }, true);
 
+        // --- CLIENT SIDE CANVAS IMAGE COMPRESSION ---
         function processImageFile(file) {
+            showToast("Görsel algılandı, sıkıştırılıyor...");
             const reader = new FileReader();
             reader.onload = function(event) {
-                addUserImageMessage(event.target.result);
-                processOcrQuery(event.target.result);
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const max_size = 1280;
+                    
+                    if (width > height) {
+                        if (width > max_size) {
+                            height *= max_size / width;
+                            width = max_size;
+                        }
+                    } else {
+                        if (height > max_size) {
+                            width *= max_size / height;
+                            height = max_size;
+                        }
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Compress to JPEG with 0.8 quality to minimize payload size and improve response speed
+                    const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+                    
+                    addUserImageMessage(compressedBase64);
+                    processOcrQuery(compressedBase64);
+                };
+                img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         }
+
+        // Direct drag and drop support on chatInput textarea
+        chatInput.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+        chatInput.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                processImageFile(file);
+            }
+        });
 
         btnCloseSidebar.addEventListener('click', () => {
             sidebar.classList.add('closed');
@@ -876,7 +1058,7 @@ HTML_TEMPLATE = """
             const msg = document.createElement('div');
             msg.className = 'message user';
             msg.innerHTML = `
-                <div class="message-meta">👤 You</div>
+                <div class="message-meta">👤 Siz</div>
                 <div class="message-content">${escapeHtml(text)}</div>
             `;
             messagesList.appendChild(msg);
@@ -887,16 +1069,16 @@ HTML_TEMPLATE = """
             const msg = document.createElement('div');
             msg.className = 'message user';
             msg.innerHTML = `
-                <div class="message-meta">👤 Uploaded Screenshot</div>
+                <div class="message-meta">👤 Ekran Görüntüsü Yüklediniz</div>
                 <div class="message-content">
-                    <img src="${base64Image}" class="msg-image-preview" alt="Screenshot">
+                    <img src="${base64Image}" class="msg-image-preview" alt="Ekran Görüntüsü">
                 </div>
             `;
             messagesList.appendChild(msg);
             scrollChat();
         }
 
-        function addBotLoadingMessage(text="Analyzing...") {
+        function addBotLoadingMessage(text="Analiz ediliyor...") {
             const msg = document.createElement('div');
             msg.className = 'chat-loading';
             msg.id = 'tempLoader';
@@ -914,13 +1096,8 @@ HTML_TEMPLATE = """
             if (loader) loader.remove();
         }
 
-        function showToast(message, type="success") {
+        function showToast(message) {
             toast.textContent = message;
-            if (type === "warning") {
-                toast.style.background = "#ef4444";
-            } else {
-                toast.style.background = "var(--accent)";
-            }
             toast.classList.add('show');
             setTimeout(() => {
                 toast.classList.remove('show');
@@ -936,7 +1113,7 @@ HTML_TEMPLATE = """
         }
 
         async function processTextQuery(url) {
-            addBotLoadingMessage("Analyzing video...");
+            addBotLoadingMessage("Video analiz ediliyor...");
             try {
                 const response = await fetch('/api/transcript', {
                     method: 'POST',
@@ -951,37 +1128,40 @@ HTML_TEMPLATE = """
                     loadedTranscripts[data.video_id] = data.transcript;
                     addBotVideoResponse([data]);
                 } else {
-                    addBotSimpleResponse(`Error: ${data.message}`);
+                    addBotSimpleResponse(`Hata oluştu: ${data.message}`);
                 }
             } catch (e) {
                 removeLoader();
-                addBotSimpleResponse("Failed to connect to the server.");
+                addBotSimpleResponse("Sunucuya bağlanılamadı.");
             }
         }
 
         async function processOcrQuery(base64Image) {
-            addBotLoadingMessage("Scanning image for videos and matching transcripts...");
+            const engine = localStorage.getItem('ocr_engine') || 'ocr_space';
+            const apiKey = localStorage.getItem('gemini_api_key') || '';
+            
+            if (engine === 'gemini' && !apiKey) {
+                removeLoader();
+                addBotSimpleResponse("Gemini API Anahtarı girilmemiş. Lütfen sağ üstteki Ayarlar ⚙️ çarkından anahtarınızı girin veya OCR.space motorunu seçin.");
+                return;
+            }
+
+            addBotLoadingMessage(engine === 'gemini' ? "Gemini AI ile videolar tespit ediliyor..." : "OCR.space ile metin taranıyor...");
             try {
                 const response = await fetch('/api/ocr', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ image: base64Image })
+                    body: JSON.stringify({ 
+                        image: base64Image,
+                        api_key: apiKey,
+                        ocr_engine: engine
+                    })
                 });
-                
-                // Always update rate limit banner status
-                await updateRateLimitBanner();
-
-                if (response.status === 429) {
-                    removeLoader();
-                    addBotSimpleResponse("Action Banned: Too many image upload requests. You have been banned for 5 minutes. IP Ban 5 min is active.");
-                    return;
-                }
-
                 const data = await response.json();
                 removeLoader();
 
                 if (data.status === 'success') {
-                    // Cache all pre-fetched transcripts into memory
+                    // Cache all pre-fetched transcripts into memory!
                     data.results.forEach(vid => {
                         if (vid.transcript) {
                             loadedTranscripts[vid.video_id] = vid.transcript;
@@ -989,12 +1169,11 @@ HTML_TEMPLATE = """
                     });
                     addBotVideoResponse(data.results);
                 } else {
-                    addBotSimpleResponse(`Scan finished but an issue occurred: ${data.message}`);
+                    addBotSimpleResponse(`Tarama tamamlandı ancak bir sorun oluştu: ${data.message}`);
                 }
             } catch (e) {
                 removeLoader();
-                addBotSimpleResponse("Screenshot OCR processing failed.");
-                await updateRateLimitBanner();
+                addBotSimpleResponse("Ekran görüntüsü OCR işlemi başarısız oldu.");
             }
         }
 
@@ -1002,11 +1181,53 @@ HTML_TEMPLATE = """
             const msg = document.createElement('div');
             msg.className = 'message bot';
             msg.innerHTML = `
-                <div class="message-meta">🤖 Transkriptor Assistant</div>
+                <div class="message-meta">🤖 Transkriptör Asistanı</div>
                 <div class="message-content">${escapeHtml(text)}</div>
             `;
             messagesList.appendChild(msg);
             scrollChat();
+        }
+
+        window.showCookiesHelp = function() {
+            alert("YouTube Çerezleri (cookies.txt) Yönlendirmesi:
+
+" +
+                  "Eğer YouTube'dan altyazı çekerken 429 (Too Many Requests) hatası alıyorsanız:
+" +
+                  "1. Tarayıcınıza 'Get cookies.txt LOCALLY' veya 'Cookie-Editor' eklentisini kurun.
+" +
+                  "2. YouTube.com adresine gidip eklenti üzerinden çerezleri Netscape formatında dışa aktarın.
+" +
+                  "3. Dosyayı 'cookies.txt' adıyla bu uygulamanın çalıştığı klasöre kaydedin.
+" +
+                  "4. Uygulamayı yeniden başlatın.");
+        };
+
+        function hasCriticalError(transcript) {
+            return !transcript || (transcript.length === 1 && transcript[0].text.includes("Kritik Hata"));
+        }
+
+        function getActionButtonsHtml(videoId, title, hasError) {
+            const encodedTitle = encodeURIComponent(title);
+            if (hasError) {
+                return `
+                    <button class="btn-card warning-btn" onclick="openTranscriptSidebar('${videoId}', '${encodedTitle}', true)">
+                        ✍️ Yapıştır
+                    </button>
+                    <button class="btn-card" onclick="openTranscriptSidebar('${videoId}', '${encodedTitle}', false)">
+                        🔍 Detay
+                    </button>
+                `;
+            } else {
+                return `
+                    <button class="btn-card primary" onclick="copyTranscriptDirectly('${videoId}')">
+                        📋 Kopyala
+                    </button>
+                    <button class="btn-card" onclick="openTranscriptSidebar('${videoId}', '${encodedTitle}', false)">
+                        🔍 Detay
+                    </button>
+                `;
+            }
         }
 
         function addBotVideoResponse(videos) {
@@ -1016,21 +1237,18 @@ HTML_TEMPLATE = """
             let videosHtml = "";
             videos.forEach((vid, idx) => {
                 const safeTitle = escapeHtml(vid.title);
+                const hasError = hasCriticalError(vid.transcript);
+                const actionBtnHtml = getActionButtonsHtml(vid.video_id, vid.title, hasError);
                 videosHtml += `
-                    <div class="video-card">
+                    <div class="video-card" id="card-${vid.video_id}">
                         <div class="video-thumb-container">
                             <img src="${vid.thumbnail}" alt="Thumbnail">
                         </div>
                         <div class="video-info">
                             <div class="video-title" title="${safeTitle}">${safeTitle}</div>
                             <div class="video-channel">👤 ${escapeHtml(vid.author)}</div>
-                            <div class="video-actions">
-                                <button class="btn-card primary" onclick="copyTranscriptDirectly('${vid.video_id}')">
-                                    📋 Copy
-                                </button>
-                                <button class="btn-card" onclick="openTranscriptSidebar('${vid.video_id}', '${encodeURIComponent(vid.title)}')">
-                                    🔍 Detail
-                                </button>
+                            <div class="video-actions" id="actions-${vid.video_id}">
+                                ${actionBtnHtml}
                             </div>
                         </div>
                     </div>
@@ -1038,9 +1256,9 @@ HTML_TEMPLATE = """
             });
 
             msg.innerHTML = `
-                <div class="message-meta">🤖 Transkriptor Assistant</div>
+                <div class="message-meta">🤖 Transkriptör Asistanı</div>
                 <div class="message-content">
-                    I found and matched <strong>${videos.length} video(s)</strong> from your screenshot:
+                    Ekran görüntünüzde / girdinizde tespit edilen videolar ve altyazı durumları:
                     <div class="videos-grid">
                         ${videosHtml}
                     </div>
@@ -1054,18 +1272,18 @@ HTML_TEMPLATE = """
         window.copyTranscriptDirectly = async function(videoId) {
             const transcript = loadedTranscripts[videoId];
             if (!transcript || transcript.length === 0) {
-                showToast("Transcript not found in cache!", "warning");
+                showToast("Altyazı önbellekte bulunamadı!", "warning");
                 return;
             }
             
             try {
                 const fullText = transcript.map(l => l.text).join(' ');
                 await navigator.clipboard.writeText(fullText);
-                showToast("Transcript copied to clipboard successfully!");
+                showToast("Altyazı metni başarıyla panoya kopyalandı!");
             } catch (e) {
                 const success = fallbackCopyTextToClipboard(transcript.map(l => l.text).join(' '));
                 if (!success) {
-                    showToast("Clipboard access error! Please copy from the 'Detail' panel.", "warning");
+                    showToast("Pano erişim hatası! Lütfen 'Detay' panelinden kopyalayın.", "warning");
                 }
             }
         };
@@ -1087,19 +1305,132 @@ HTML_TEMPLATE = """
             return successful;
         }
 
-        window.openTranscriptSidebar = function(videoId, encodedTitle) {
+        let activeVideoIdForEdit = null;
+
+        window.openTranscriptSidebar = function(videoId, encodedTitle, forceEdit = false) {
             activeVideoTitle = decodeURIComponent(encodedTitle);
             sidebarTitle.textContent = activeVideoTitle;
             sidebar.classList.remove('closed');
+            activeVideoIdForEdit = videoId;
 
             const transcript = loadedTranscripts[videoId];
-            if (transcript) {
+            const hasError = hasCriticalError(transcript);
+
+            if (hasError || forceEdit) {
+                renderSidebarPasteInterface(videoId);
+            } else {
                 activeTranscript = transcript;
                 renderSidebarLines(transcript, videoId);
-            } else {
-                sidebarLines.innerHTML = `<div style='color:#ef4444'>Transcript not found in cache!</div>`;
             }
         };
+
+        window.triggerSidebarEdit = function() {
+            if (activeVideoIdForEdit) {
+                openTranscriptSidebar(activeVideoIdForEdit, encodeURIComponent(activeVideoTitle), true);
+            }
+        };
+
+        function renderSidebarPasteInterface(videoId) {
+            const transcript = loadedTranscripts[videoId];
+            const existingText = (transcript && !hasCriticalError(transcript)) ? transcript.map(l => l.text).join('
+') : "";
+            
+            sidebarLines.innerHTML = `
+                <div style="margin-bottom: 1rem; color: #f59e0b; font-size: 0.85rem; line-height: 1.4;">
+                    ⚠️ YouTube altyazı çekimini engelledi veya altyazı bulunamadı. Lütfen altyazıyı manuel yapıştırıp kaydedin.
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem; height: calc(100% - 60px);">
+                    <textarea id="manualSubInput" placeholder="Buraya altyazı metnini yapıştırın... (Düz metin veya zaman damgalı satırlar desteklenir)" style="width: 100%; flex: 1; min-height: 250px; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); padding: 0.75rem; resize: vertical; font-family: inherit; font-size: 0.9rem; outline: none; line-height: 1.5;"></textarea>
+                    <button class="btn-card primary" onclick="saveManualTranscript('${videoId}')" style="width: 100%; padding: 0.85rem; font-weight: 600;">
+                        💾 Altyazıyı Kaydet
+                    </button>
+                    ${(transcript && !hasCriticalError(transcript)) ? `<button class="btn-card" onclick="openTranscriptSidebar('${videoId}', '${encodeURIComponent(activeVideoTitle)}', false)" style="width: 100%; padding: 0.5rem; font-size: 0.8rem; margin-top: 0.25rem;">İptal Et</button>` : ''}
+                </div>
+            `;
+            
+            document.getElementById('manualSubInput').value = existingText;
+            document.getElementById('manualSubInput').focus();
+        }
+
+        window.saveManualTranscript = function(videoId) {
+            const textarea = document.getElementById('manualSubInput');
+            if (!textarea) return;
+            const inputVal = textarea.value.trim();
+            if (!inputVal) {
+                showToast("Lütfen geçerli bir metin girin!", "warning");
+                return;
+            }
+
+            // Parse pasted subtitles
+            const parsedLines = parsePastedTranscript(inputVal);
+            loadedTranscripts[videoId] = parsedLines;
+            
+            // Re-render sidebar in view mode
+            openTranscriptSidebar(videoId, encodeURIComponent(activeVideoTitle), false);
+            
+            // Also update the video card UI in the chat list
+            updateVideoCardButtons(videoId);
+            
+            showToast("Altyazı başarıyla güncellendi!");
+        };
+
+        window.updateVideoCardButtons = function(videoId) {
+            const container = document.getElementById(`actions-${videoId}`);
+            if (container) {
+                const hasError = hasCriticalError(loadedTranscripts[videoId]);
+                container.innerHTML = getActionButtonsHtml(videoId, activeVideoTitle, hasError);
+            }
+        };
+
+        function parsePastedTranscript(text) {
+            const lines = text.split('
+');
+            const result = [];
+            let currentSec = 0;
+            
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return;
+                
+                // Try to detect timestamp like [01:23] or 12:34 or [1:23:45] or 01:23.45
+                const timestampMatch = trimmed.match(/^(?:\[?\(?)?(\d{1,2})?:?(\d{1,2}):(\d{2})(?:\.\d+)?(?:\]?\)?\s*-?\s*)?(.*)$/);
+                
+                if (timestampMatch) {
+                    const hours = timestampMatch[1] ? parseInt(timestampMatch[1]) : 0;
+                    const minutes = parseInt(timestampMatch[2]);
+                    const seconds = parseInt(timestampMatch[3]);
+                    const content = timestampMatch[4].trim();
+                    
+                    const timeInSeconds = (hours * 3600) + (minutes * 60) + seconds;
+                    if (content) {
+                        result.push({
+                            text: content,
+                            start: timeInSeconds,
+                            duration: 2.0 // default duration estimation
+                        });
+                        currentSec = timeInSeconds;
+                    }
+                } else {
+                    // Just raw text line, assume sequential timestamps spaced by 3 seconds
+                    result.push({
+                        text: trimmed,
+                        start: currentSec,
+                        duration: 3.0
+                    });
+                    currentSec += 3.0;
+                }
+            });
+            
+            // If nothing parsed, return a single line with full text
+            if (result.length === 0) {
+                result.push({
+                    text: text,
+                    start: 0,
+                    duration: 10
+                });
+            }
+            return result;
+        }
 
         function renderSidebarLines(lines, videoId) {
             sidebarLines.innerHTML = "";
@@ -1138,16 +1469,17 @@ HTML_TEMPLATE = """
             if (!activeTranscript.length) return;
             const fullText = activeTranscript.map(l => l.text).join(' ');
             navigator.clipboard.writeText(fullText);
-            showToast("Full transcript copied!");
+            showToast("Bütün metin kopyalandı!");
         });
 
         btnDownloadTranscriptTxt.addEventListener('click', () => {
             if (!activeTranscript.length) return;
             let output = "";
             activeTranscript.forEach(l => {
-                output += `[${formatTime(l.start)}] ${l.text}\n`;
+                output += `[${formatTime(l.start)}] ${l.text}
+`;
             });
-            const filename = `${activeVideoTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`;
+            const filename = `${activeVideoTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_altyazi.txt`;
             
             const blob = new Blob([output], { type: 'text/plain;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
@@ -1487,6 +1819,26 @@ def is_good_match(query, video_title):
     required = 2 if len(q_words) >= 3 else 1
     return matches >= required
 
+
+def call_gemini_api(api_key, model, contents, system_instruction=None):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {"contents": contents}
+    if system_instruction:
+        payload["systemInstruction"] = {
+            "parts": [{"text": system_instruction}]
+        }
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        if response.status_code == 200:
+            res_json = response.json()
+            text = res_json['candidates'][0]['content']['parts'][0]['text']
+            return text, True
+        else:
+            return f"Gemini API Error ({response.status_code}): {response.text}", False
+    except Exception as e:
+        return f"Connection Error: {str(e)}", False
+
 @app.route('/api/ocr', methods=['POST'])
 def process_ocr():
     # 1. Rate Limit Validation
@@ -1502,16 +1854,96 @@ def process_ocr():
 
     data = request.json or {}
     image_base64 = data.get('image', '')
+    api_key = data.get('api_key', '')
+    ocr_engine = data.get('ocr_engine', 'ocr_space')
     
     if not image_base64:
         return jsonify({'status': 'error', 'message': 'Could not retrieve image data!'})
         
     try:
         if ',' in image_base64:
-            image_base64 = image_base64.split(',')[1]
+            image_base64_clean = image_base64.split(',')[1]
+            mime_type = image_base64.split(',')[0].split(';')[0].split(':')[1]
+        else:
+            image_base64_clean = image_base64
+            mime_type = 'image/png'
             
+        # 2. Run OCR based on selected engine
+        if ocr_engine == 'gemini' and api_key:
+            print("Using Gemini Multimodal OCR...", flush=True)
+            prompt = (
+                "Identify the YouTube video titles and channel names in this image. "
+                "For each video, return a JSON list containing its title and channel name. "
+                "Format: [{\"title\": \"video title\", \"channel\": \"channel name\"}]. "
+                "Return raw JSON only, no markdown or any other explanation text."
+            )
+            contents = [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": mime_type,
+                            "data": image_base64_clean
+                        }
+                    }
+                ]
+            }]
+            ai_res, success = call_gemini_api(api_key, "gemini-1.5-flash", contents)
+            if not success:
+                return jsonify({'status': 'error', 'message': f"Gemini API Error: {ai_res}"})
+            
+            clean_json = re.sub(r'```json|```', '', ai_res).strip()
+            import json
+            try:
+                videos_data = json.loads(clean_json)
+            except Exception as parse_err:
+                print("Failed to parse Gemini JSON:", parse_err, flush=True)
+                print("Raw Gemini output:", ai_res, flush=True)
+                return jsonify({'status': 'error', 'message': f"Failed to parse Gemini output as JSON. Output: {ai_res}"})
+            
+            final_results = []
+            seen_video_ids = set()
+            
+            for vid in videos_data:
+                title = vid.get('title', '').strip()
+                channel = vid.get('channel', '').strip()
+                if not title:
+                    continue
+                
+                q = f"{channel} {title}".strip()
+                print(f"Trying search (Gemini Match): '{q}'", flush=True)
+                video_meta = search_youtube(q)
+                
+                if not video_meta and title:
+                    print(f"Trying search (Title only): '{title}'", flush=True)
+                    video_meta = search_youtube(title)
+                
+                if video_meta:
+                    if is_good_match(title, f"{video_meta['title']} {video_meta['author']}"):
+                        if video_meta['video_id'] not in seen_video_ids:
+                            transcript_data = fetch_transcript_api_safely(video_meta['video_id'])
+                            if transcript_data:
+                                video_meta['transcript'] = transcript_data
+                            else:
+                                video_meta['transcript'] = [{
+                                    'text': '[Critical Error: YouTube blocked transcript fetch from this IP (429) or subtitles are disabled.]',
+                                    'start': 0.0,
+                                    'duration': 0.0
+                                }]
+                            final_results.append(video_meta)
+                            seen_video_ids.add(video_meta['video_id'])
+            
+            if final_results:
+                return jsonify({
+                    'status': 'success',
+                    'results': final_results
+                })
+            else:
+                return jsonify({'status': 'error', 'message': 'No matching videos found on YouTube.'})
+                
+        # 3. Fallback to OCR.space
         payload = {
-            'base64Image': f"data:image/png;base64,{image_base64}",
+            'base64Image': f"data:{mime_type};base64,{image_base64_clean}",
             'language': 'eng',
             'isOverlayRequired': False,
             'OCREngine': '2',
@@ -1519,8 +1951,8 @@ def process_ocr():
             'scale': 'true'
         }
         
-        api_key = os.environ.get('OCR_API_KEY', 'helloworld')
-        headers = {'apikey': api_key}
+        ocr_api_key = os.environ.get('OCR_API_KEY', 'helloworld')
+        headers = {'apikey': ocr_api_key}
         ocr_response = requests.post(
             'https://api.ocr.space/parse/image',
             data=payload,
