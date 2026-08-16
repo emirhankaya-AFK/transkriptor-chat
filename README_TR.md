@@ -1,5 +1,7 @@
 # YouTube Altyazı & Ekran Görüntüsü OCR Sohbet Robotu (Transkriptör Chat)
 
+[English](README.md) | [Türkçe](README_TR.md)
+
 YouTube videolarından otomatik olarak altyazı çeken, arama yapan, ekran görüntülerinden akıllı çok sütunlu OCR (Optik Karakter Tanıma) gerçekleştiren ve modern, glassmorphic (cam tasarımlı) sohbet arayüzü ile tüm bu süreçleri yöneten güçlü bir Flask tabanlı masaüstü/web uygulamasıdır.
 
 ## 🚀 Özellikler

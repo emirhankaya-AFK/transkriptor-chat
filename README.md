@@ -1,5 +1,7 @@
 # YouTube Transcript & Screenshot OCR Chatbot (Transkriptör Chat)
 
+[English](README.md) | [Türkçe](README_TR.md)
+
 A powerful, premium Flask-based desktop and web application designed to automatically parse, search, extract transcripts from YouTube, perform intelligent multi-column OCR from screenshots, and manage video metadata with a modern, glassmorphic chatbot user interface.
 
 ## 🚀 Features
